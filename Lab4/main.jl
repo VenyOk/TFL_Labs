@@ -1,5 +1,5 @@
 const MAX_GROUPS = 9
-
+SYMBOL = 'a'
 # Определение структур для различных типов узлов AST
 struct group_node
     id::Int
@@ -172,7 +172,7 @@ end
 # Функция для парсинга базовых выражений
 function parsing_base(p::ParsingState)
     token = cur_t(p)
-    println("parsing_base = $token")
+    #println("parsing_base = $token")
     if token === nothing
         error("Конец выражения")
     end
@@ -260,69 +260,50 @@ function build_cfg(ast)
 
     # Вспомогательная функция для создания правил грамматики
     function create_rule(node, lhs::String)
-        # Если узел представляет собой символ
         if isa(node, char_node)
-            rules[lhs] = [[string(node.char)]]
-
-        # Если узел представляет собой группу
+            if node.char == SYMBOL
+                rules[lhs] = [[string(node.char) * ";\t$(lhs).attr = 1"]]
+            else
+                rules[lhs] = [[string(node.char) * ";\t$(lhs).attr = 0"]]
+            end
         elseif isa(node, group_node)
             group_nt = "G$(node.id)"
             create_rule(node.nd, group_nt)
-            rules[lhs] = [[group_nt]]
-
-        # Если узел представляет собой негруппу
+            rules[lhs] = [[group_nt * ";\t$(lhs).attr = $(group_nt).attr"]]
         elseif isa(node, non_group_node)
             sub_nt = fresh_nonterminal("N", nonterminal_index)
             create_rule(node.nd, sub_nt)
-            rules[lhs] = [[sub_nt]]
-
-        # Если узел представляет собой опережающую проверку
+            rules[lhs] = [[sub_nt * ";\t$(sub_nt).attr = $(lhs).attr"]]
         elseif isa(node, look_ahead_node)
-            rules[lhs] = [[]]  # Опережающая проверка заменяется на ε
-
-        # Если узел представляет собой конкатенацию
+            rules[lhs] = [[]]
         elseif isa(node, concat_node)
             sub_nts = [fresh_nonterminal("C", nonterminal_index) for _ in node.nds]
             for (i, sub_node) in enumerate(node.nds)
                 create_rule(sub_node, sub_nts[i])
             end
-            rules[lhs] = [sub_nts]
-
-        # Если узел представляет собой альтернативу
+            right = ";\t$(lhs).attr = " * join(["$(sub_nt).attr" for sub_nt in sub_nts], " + ")
+            rules[lhs] = [[sub_nts...; right]]
         elseif isa(node, alt_node)
             sub_nts = [fresh_nonterminal("A", nonterminal_index) for _ in node.branch]
             for (i, branch) in enumerate(node.branch)
                 create_rule(branch, sub_nts[i])
             end
-            rules[lhs] = [[sub_nt] for sub_nt in sub_nts]
-
-        # Если узел представляет собой звезду (повторение)
+            rules[lhs] = [[sub_nt * ";\t$(lhs).attr = $(sub_nt).attr"] for sub_nt in sub_nts]
         elseif isa(node, star_node)
             sub_nt = fresh_nonterminal("R", nonterminal_index)
             create_rule(node.nd, sub_nt)
-            rules[lhs] = [[], [lhs, sub_nt]]  # R -> ε | R sub_nt
-
-        # Если узел представляет собой ссылку на выражение
+            rules[lhs] = [[], [lhs, sub_nt * ";\t$(lhs).attr += $(sub_nt).attr"]]
         elseif isa(node, expr_ref_node)
             group_nt = "G$(node.id)"
-            rules[lhs] = [[group_nt]]
-
-        # Если тип узла неизвестен
+            rules[lhs] = [[group_nt * ";\t$(group_nt).attr = \$(lhs).attr"]]
         else
             error("Неизвестный тип узла AST")
         end
     end
-
-    # Начальный нетерминал
+    
     start_symbol = "S"
-
-    # Создание правил для корневого узла AST
     create_rule(ast, start_symbol)
-
-    # Преобразование правил в структуру GrammarRule
     grammar_rules = [GrammarRule(lhs, rhs) for (lhs, rhs) in rules]
-
-    # Возврат начального нетерминала и списка правил грамматики
     return start_symbol, grammar_rules
 end
 
@@ -332,14 +313,14 @@ function main()
         expr = readline()
         LEX = lex(expr)
         tokens = tokenize(LEX)
-        for t in tokens
+        #=for t in tokens
             println("$(t.type), $(t.val)")
         end
 
         for i in 1:20
             print("-")
         end
-        println()
+        println()=#
 
         p = ParsingState(1, false, 0, tokens, Dict())
         ast = parsing(p)
