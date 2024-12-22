@@ -70,25 +70,23 @@ function tokenize(L::lex)
         elseif symbol == '('
             L.index += 1
             symbol3 = current(L)
-            if symbol3 !== nothing
-                if symbol3 == '?'
+            if symbol3 == '?'
+                L.index += 1
+                symbol4 = current(L)
+                if symbol4 == '='
+                    push!(t, token("look_ahead_open", nothing))
                     L.index += 1
-                    symbol4 = current(L)
-                    if symbol4 == '='
-                        push!(t, token("look_ahead_open", nothing))
-                        L.index += 1
-                    elseif symbol4 == ':'
-                        push!(t, token("non_cap_open", nothing))
-                        L.index += 1
-                    elseif symbol4 >= '0' && symbol4 <= '9'
-                        push!(t, token("expr_ref_open", Int(symbol4)))
-                        L.index += 1
-                    else
-                        error("Некорректный символ после '?': $symbol4")
-                    end
+                elseif symbol4 == ':'
+                    push!(t, token("non_cap_open", nothing))
+                    L.index += 1
+                elseif symbol4 >= '0' && symbol4 <= '9'
+                    push!(t, token("expr_ref_open", symbol4 - '0'))
+                    L.index += 1
                 else
-                    push!(t, token("open_br", nothing))
+                    error("Некорректный символ после '?': $symbol4")
                 end
+            else
+                    push!(t, token("open_br", nothing))
             end
         else
             error("Неопознанный символ $symbol")
@@ -103,7 +101,7 @@ mutable struct ParsingState
     l_ahead::Bool
     group::Int # количество групп
     t::Vector{token}
-    groups::Dict
+    groups::Dict{Int, Any}
 end
 
 # Конструктор для состояния парсера
@@ -139,13 +137,12 @@ function parsing(p::ParsingState)
     if cur_t(p) !== nothing
         error("Лишние символы после корректного выражения")
     end
-    refs(p, ast, Set())
     return ast
 end
 
 # Функция для парсинга альтернатив
 function parsing_alt(p::ParsingState)
-    br = [parsing_concat(p)]
+    br = Any[parsing_concat(p)]
     while cur_t(p) !== nothing && cur_t(p).type == "alternative"
         check_token(p, "alternative")
         push!(br, parsing_concat(p))
@@ -155,7 +152,7 @@ end
 
 # Функция для парсинга конкатенаций
 function parsing_concat(p::ParsingState)
-    nd = []
+    nd = Any[]
     while cur_t(p) !== nothing && cur_t(p).type ∉ ["alternative", "close_br"]
         push!(nd, parsing_star(p))
     end
@@ -185,15 +182,15 @@ function parsing_base(p::ParsingState)
         check_token(p, "close_br")
         return non_group_node(nd)
     elseif token.type == "char"
-        v = token.val
         check_token(p, "char")
-        return char_node(v)
+        return char_node(token.val)
     elseif token.type == "look_ahead_open"
         if !(p.l_ahead)
             check_token(p, "look_ahead_open")
             temp_l_ahead = p.l_ahead
             p.l_ahead = true
             nd = parsing_alt(p)
+            internal_check(p, nd, true)
             p.l_ahead = temp_l_ahead
             check_token(p, "close_br")
             return look_ahead_node(nd)
@@ -218,49 +215,6 @@ function parsing_base(p::ParsingState)
         return group_node(id, nd)
     else
         error("Неизвестный токен $token")
-    end
-end
-
-
-# Функция для проверки ссылок на группы
-function refs(p::ParsingState, nd, g)
-    println("ND = $nd")
-    if isa(nd, group_node)
-        new_set = refs(p, nd.nd, g)
-        push!(new_set, nd.id)
-        return new_set
-    elseif isa(nd, non_group_node)
-        return refs(p, nd.nd, g)
-    elseif isa(nd, concat_node)
-        current_set = copy(g)
-        for j in nd.nds
-            current_set = refs(p, j, current_set)
-        end
-        return current_set
-    elseif isa(nd, expr_ref_node)
-        if nd.id ∉ keys(p.groups)
-            error("Ошибка: Ссылка на несуществующую группу")
-        end
-        if nd.id ∉ g
-            error("Ошибка: Ссылка на группу вне области видимости")
-        end
-        return g
-    elseif isa(nd, char_node)
-        return g
-    elseif isa(nd, star_node)
-        return refs(p, nd.nd, g)
-    elseif isa(nd, look_ahead_node)
-        internal_check(p, nd.nd, true)
-        return refs(p, nd.nd, g)
-    elseif isa(nd, alt_node)
-        combined_set = Set(g)
-        for br in nd.branch
-            branch_set = refs(p, br, g)
-            union!(combined_set, branch_set)
-        end
-        return combined_set
-    else
-        error("Неизвестный тип node")
     end
 end
 
@@ -297,44 +251,63 @@ function fresh_nonterminal(prefix::String, index::Ref{Int})
     return "$(prefix)$(index[])"
 end
 
-# Функция для построения каркасной КС-грамматики
 function build_cfg(ast)
+    # Инициализация словаря для хранения правил грамматики
     rules = Dict{String, Vector{Vector{String}}}()
+
+    # Счетчик для генерации уникальных имен нетерминалов
     nonterminal_index = Ref(0)
 
     # Вспомогательная функция для создания правил грамматики
     function create_rule(node, lhs::String)
+        # Если узел представляет собой символ
         if isa(node, char_node)
             rules[lhs] = [[string(node.char)]]
+
+        # Если узел представляет собой группу
         elseif isa(node, group_node)
             group_nt = "G$(node.id)"
             create_rule(node.nd, group_nt)
             rules[lhs] = [[group_nt]]
+
+        # Если узел представляет собой негруппу
         elseif isa(node, non_group_node)
             sub_nt = fresh_nonterminal("N", nonterminal_index)
             create_rule(node.nd, sub_nt)
             rules[lhs] = [[sub_nt]]
+
+        # Если узел представляет собой опережающую проверку
         elseif isa(node, look_ahead_node)
             rules[lhs] = [[]]  # Опережающая проверка заменяется на ε
+
+        # Если узел представляет собой конкатенацию
         elseif isa(node, concat_node)
             sub_nts = [fresh_nonterminal("C", nonterminal_index) for _ in node.nds]
             for (i, sub_node) in enumerate(node.nds)
                 create_rule(sub_node, sub_nts[i])
             end
             rules[lhs] = [sub_nts]
+
+        # Если узел представляет собой альтернативу
         elseif isa(node, alt_node)
             sub_nts = [fresh_nonterminal("A", nonterminal_index) for _ in node.branch]
             for (i, branch) in enumerate(node.branch)
                 create_rule(branch, sub_nts[i])
             end
             rules[lhs] = [[sub_nt] for sub_nt in sub_nts]
+
+        # Если узел представляет собой звезду (повторение)
         elseif isa(node, star_node)
             sub_nt = fresh_nonterminal("R", nonterminal_index)
             create_rule(node.nd, sub_nt)
             rules[lhs] = [[], [lhs, sub_nt]]  # R -> ε | R sub_nt
+
+        # Если узел представляет собой ссылку на выражение
         elseif isa(node, expr_ref_node)
             group_nt = "G$(node.id)"
             rules[lhs] = [[group_nt]]
+
+        # Если тип узла неизвестен
         else
             error("Неизвестный тип узла AST")
         end
@@ -342,13 +315,17 @@ function build_cfg(ast)
 
     # Начальный нетерминал
     start_symbol = "S"
+
+    # Создание правил для корневого узла AST
     create_rule(ast, start_symbol)
 
     # Преобразование правил в структуру GrammarRule
     grammar_rules = [GrammarRule(lhs, rhs) for (lhs, rhs) in rules]
 
+    # Возврат начального нетерминала и списка правил грамматики
     return start_symbol, grammar_rules
 end
+
 
 function main()
     try
