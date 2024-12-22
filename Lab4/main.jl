@@ -74,10 +74,10 @@ function tokenize(L::lex)
                 L.index += 1
                 symbol4 = current(L)
                 if symbol4 == '='
-                    push!(t, token("look_ahead_open", nothing))
+                    push!(t, token("lookahead", nothing))
                     L.index += 1
                 elseif symbol4 == ':'
-                    push!(t, token("non_cap_open", nothing))
+                    push!(t, token("no_capture", nothing))
                     L.index += 1
                 elseif symbol4 >= '0' && symbol4 <= '9'
                     push!(t, token("expr_ref_open", symbol4 - '0'))
@@ -176,17 +176,17 @@ function parsing_base(p::ParsingState)
     if token === nothing
         error("Конец выражения")
     end
-    if token.type == "non_cap_open"
-        check_token(p, "non_cap_open")
+    if token.type == "no_capture"
+        check_token(p, "no_capture")
         nd = parsing_alt(p)
         check_token(p, "close_br")
         return non_group_node(nd)
     elseif token.type == "char"
         check_token(p, "char")
         return char_node(token.val)
-    elseif token.type == "look_ahead_open"
+    elseif token.type == "lookahead"
         if !(p.l_ahead)
-            check_token(p, "look_ahead_open")
+            check_token(p, "lookahead")
             temp_l_ahead = p.l_ahead
             p.l_ahead = true
             nd = parsing_alt(p)
@@ -273,7 +273,7 @@ function build_cfg(ast)
         elseif isa(node, non_group_node)
             sub_nt = fresh_nonterminal("N", nonterminal_index)
             create_rule(node.nd, sub_nt)
-            rules[lhs] = [[sub_nt * ";\t$(sub_nt).attr = $(lhs).attr"]]
+            rules[lhs] = [[sub_nt * ";\t$(lhs).attr = $(sub_nt).attr"]]
         elseif isa(node, look_ahead_node)
             rules[lhs] = [[]]
         elseif isa(node, concat_node)
@@ -307,7 +307,6 @@ function build_cfg(ast)
     return start_symbol, grammar_rules
 end
 
-
 function main()
     try
         expr = readline()
@@ -332,15 +331,24 @@ function main()
         println("Регулярное выражение корректно")
 
         # Построение каркасной КС-грамматики
-        start_symbol, grammar_rules = build_cfg(ast)
-        println("Построенная КС-грамматика (каркас):")
-        println("Начальный нетерминал: $start_symbol")
+        _, grammar_rules = build_cfg(ast)
+        println("КС-грамматика:")
         for rule in grammar_rules
             for rhs in rule.rhs
                 rhs_str = rhs == [] ? "ε" : join(rhs, " ")
                 println("$(rule.lhs) -> $rhs_str")
             end
         end
+
+        #=println("Введите строку для проверки:")
+        input_string = readline()
+
+        # Парсинг введенной строки
+        if parse_string(input_string, start_symbol, grammar_rules)
+            println("Строка '$input_string' соответствует регулярному выражению.")
+        else
+            println("Строка '$input_string' НЕ соответствует регулярному выражению.")
+        end=#
     catch e
         println("Ошибка: ", e)
     end
