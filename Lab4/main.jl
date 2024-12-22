@@ -295,7 +295,7 @@ function build_cfg(ast)
             rules[lhs] = [[], [lhs, sub_nt * ";\t$(lhs).attr += $(sub_nt).attr"]]
         elseif isa(node, expr_ref_node)
             group_nt = "G$(node.id)"
-            rules[lhs] = [[group_nt * ";\t$(group_nt).attr = \$(lhs).attr"]]
+            rules[lhs] = [[group_nt * ";\t$(group_nt).attr = $(lhs).attr"]]
         else
             error("Неизвестный тип узла AST")
         end
