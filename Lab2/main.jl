@@ -2,37 +2,30 @@ using JSON, HTTP
 
 const ALPH = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "ε"]
 
-# Кэширование результатов функции word_membership
-const word_membership_cache = Dict{String, Bool}()
-
 function word_membership(word)
-    if haskey(word_membership_cache, word)
-        return word_membership_cache[word]
-    end
     payload = JSON.json(Dict("word" => word))
     resp = HTTP.post("http://localhost:8080/checkWord", body=payload, headers=["Content-Type" => "application/json"])
     if resp.status != 200
         error("Ошибка во время соединения")
     end
     res = JSON.parse(String(resp.body))
-    result = res["response"] == "1"
-    word_membership_cache[word] = result
-    return result
+    return res["response"] == "1"
 end
 
 function all_suffs(word)
     ans = []
+    last_ind = lastindex(word)
     for w_ind in eachindex(word)
-        push!(ans, word[w_ind:lastindex(word)])
+        push!(ans, word[w_ind:last_ind])
     end
     return ans
 end
 
 function printing(main_prefixes, non_main_prefixes, suffixes, Table)
-    prefs = vcat(main_prefixes, non_main_prefixes)
+    prefs = unique(vcat(main_prefixes, non_main_prefixes))
     sufs = unique(suffixes)
     println("\t", join(sufs, " | "))
-    println('-' ^ (15 + length(sufs) * 5))
+    println('-' ^ (length(sufs) * 5))
     for p in prefs
         r = []
         for s in sufs
@@ -78,6 +71,7 @@ function solve(main_prefixes, non_main_prefixes, suffixes, Table)
         end
         counter = equal(main_prefixes, non_main_prefixes, suffixes, Table)
         if counter == "true"
+            printing(main_prefixes, non_main_prefixes, suffixes, Table)
             println("THE END")
             exit
             break
@@ -112,7 +106,7 @@ function main()
     print("Введите режим работы: ")
     mode = readline()
     payload = JSON.json(Dict("mode" => mode))
-    resp = HTTP.post("http://localhost:8080/generate", body=payload, headers=["Content-Type" => "application/json"])
+    _ = HTTP.post("http://localhost:8080/generate", body=payload, headers=["Content-Type" => "application/json"])
     main_prefixes = ["ε"]
     non_main_prefixes = filter(x -> x != "ε", ALPH)
     suffixes = ["ε"]
